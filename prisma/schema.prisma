@@ -1,0 +1,121 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model BotConfig {
+  id Int @id @default(autoincrement())
+  key String @unique
+  value String
+}
+
+model SourceGroup {
+  id Int @id @default(autoincrement())
+  chatId String @unique
+  chatTitle String?
+  addedAt DateTime @default(now())
+}
+
+model TargetGroup {
+  id Int @id @default(autoincrement())
+  chatId String @unique
+  chatTitle String?
+  shouldPin Boolean @default(false)
+  forwardingRuleId Int?
+  forwardingRule ForwardingRule? @relation(fields: [forwardingRuleId], references: [id], onDelete: SetNull)
+  filterRuleId Int?
+  filterRule FilterRule? @relation(fields: [filterRuleId], references: [id], onDelete: SetNull)
+  messageFormatId Int?
+  messageFormat MessageFormat? @relation(fields: [messageFormatId], references: [id], onDelete: SetNull)
+  addedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 消息过滤规则模型
+enum FilterType {
+  WHITELIST
+  BLACKLIST
+}
+
+// 关键词过滤规则模型
+model FilterRule {
+  id Int @id @default(autoincrement())
+  name String
+  type FilterType
+  keywords Json // 关键词数组
+  isEnabled Boolean @default(true)
+  addedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  targetGroups TargetGroup[]
+}
+
+// 消息格式配置模型
+model MessageFormat {
+  id Int @id @default(autoincrement())
+  name String
+  prefix String?
+  suffix String?
+  enableMarkdown Boolean @default(false)
+  isEnabled Boolean @default(true)
+  addedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  targetGroups TargetGroup[]
+}
+
+// 转发规则模型
+model ForwardingRule {
+  id Int @id @default(autoincrement())
+  name String
+  replacements Json // 存储替换规则数组，e.g. [{"search": "foo", "replace": "bar", "isRegex": false}, ...]
+  isEnabled Boolean @default(true)
+  addedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  targets TargetGroup[]
+}
+
+// 统计数据模型
+model ForwardingStats {
+  id Int @id @default(autoincrement())
+  date DateTime @unique
+  forwardedCount Int @default(0)
+  failedCount Int @default(0)
+  blockedByFilterCount Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// API使用统计模型
+model ApiUsage {
+  id Int @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  method String
+  success Boolean
+  responseTime Int // ms
+  errorMessage String?
+}
+
+// 更新目标群组模型
+enum HealthCheckStatus {
+  OK
+  WARNING
+  ERROR
+}
+
+// 健康检查记录模型
+model HealthCheck {
+  id Int @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  status HealthCheckStatus
+  message String?
+  details Json?
+}

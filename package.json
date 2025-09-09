@@ -1,0 +1,36 @@
+{
+  "name": "telegram-monitor-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "dev": "nodemon --watch src --exec ts-node src/index.ts",
+    "prod": "pm2 start dist/index.js --name telegram-monitor-bot",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "monitor",
+    "forwarder"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "A Telegram bot for monitoring and forwarding messages between groups",
+  "dependencies": {
+    "@prisma/client": "^6.15.0",
+    "dotenv": "^17.2.2",
+    "node-cron": "^4.2.1",
+    "sqlite3": "^5.1.7",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/node-cron": "^3.0.11",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}
