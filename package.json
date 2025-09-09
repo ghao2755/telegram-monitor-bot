@@ -1,0 +1,38 @@
+{
+  "name": "telegram-message-forwarder-bot",
+  "version": "1.0.0",
+  "description": "A Telegram bot for forwarding messages with multi-group support and text replacement",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop telegram-forwarder-bot",
+    "pm2:status": "pm2 status",
+    "pm2:logs": "pm2 logs telegram-forwarder-bot",
+    "docker:build": "docker build -t telegram-forwarder-bot .",
+    "docker:run": "docker run -d --name telegram-bot --env-file .env telegram-forwarder-bot",
+    "docker:stop": "docker stop telegram-bot",
+    "docker:logs": "docker logs -f telegram-bot"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "message",
+    "forwarder",
+    "telegraf",
+    "multi-group",
+    "text-replacement"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "telegraf": "^4.12.2",
+    "dotenv": "^16.3.1",
+    "node-cron": "^3.0.2",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
