@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  telegram-monitor-bot:
+    build: .
+    container_name: telegram-monitor-bot
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      # 这些环境变量可以在.env文件中设置，或者直接在这里定义
+      # - BOT_TOKEN=你的机器人token
+      # - ADMIN_IDS=管理员ID列表，用逗号分隔
+    volumes:
+      # 挂载数据目录，确保数据持久化
+      - ./data:/app/data
+      # 挂载.env文件
+      - ./.env:/app/.env:ro
+    # 如果机器人需要暴露端口（例如，用于健康检查或webhook），可以取消注释以下行
+    # ports:
+    #   - "3000:3000"
+    # 健康检查配置
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # 可选：添加日志收集服务（例如，使用ELK栈或其他日志系统）
+  # 这里是一个示例配置，使用fluentd收集日志
+  # fluentd:
+  #   image: fluent/fluentd:v1.14-debian-1
+  #   container_name: fluentd
+  #   volumes:
+  #     - ./fluentd/conf:/fluentd/etc
+  #     - fluentd-logs:/fluentd/log
+  #   ports:
+  #     - "24224:24224"
+  #     - "24224:24224/udp"
+  #   depends_on:
+  #     - telegram-monitor-bot
+
+# 可选：定义日志卷（如果使用外部日志收集服务）
+# volumes:
+#   fluentd-logs:
+#     driver: local
