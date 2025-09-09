@@ -3,94 +3,126 @@ const { Markup } = require('telegraf');
 const fs = require('fs-extra');
 const path = require('path');
 
+// 导入日志模块
+const logger = require('./logger');
+
 // 导入自定义模块
 const keyboard = require('./keyboard');
 const utils = require('./utils');
 
-// 处理菜单导航
+// 从bot模块导入updateActivity函数
+let updateActivity = () => {};
+
+// 导出设置updateActivity函数的方法，供bot.js调用
+exports.setupActivityTracker = (updateFn) => {
+  updateActivity = updateFn || (() => {});
+};
+
+// 在处理菜单导航时更新活动时间
 const handleMenuNavigation = async (ctx, menuType) => {
   try {
+    // 更新活动时间
+    updateActivity();
+    
     // 记录当前菜单
     await utils.setUserSession(ctx.from.id, { currentMenu: menuType });
     
-    // 根据菜单类型显示相应的界面
-    switch (menuType) {
-      case 'main':
-        await ctx.editMessageText('欢迎使用Telegram监控机器人控制面板', 
-          Markup.inlineKeyboard(keyboard.getMainKeyboard()));
-        break;
-        
-      case 'dashboard':
-      case 'status': // 兼容旧的菜单类型
-        const status = await require('./bot').getSystemStatus();
-        // 确保数据有效
-        if (!status) {
-          throw new Error('无法获取系统状态');
-        }
-        await ctx.editMessageText(status, 
-          Markup.inlineKeyboard(keyboard.getDashboardKeyboard()));
-        break;
-        
-      case 'groups':
-        await ctx.editMessageText('群组管理 - 请选择操作：', 
-          Markup.inlineKeyboard(keyboard.getGroupsKeyboard()));
-        break;
-        
-      case 'rules':
-        await ctx.editMessageText('规则管理 - 请选择操作：', 
-          Markup.inlineKeyboard(keyboard.getRulesKeyboard()));
-        break;
-        
-      case 'pinning':
-        await ctx.editMessageText('置顶管理 - 请选择操作：', 
-          Markup.inlineKeyboard(keyboard.getPinningKeyboard()));
-        break;
-        
-      case 'diagnostics':
-        await ctx.editMessageText('系统自检 - 请选择操作：', 
-          Markup.inlineKeyboard(keyboard.getDiagnosticsKeyboard()));
-        break;
-        
-      case 'settings':
-        await ctx.editMessageText('设置 - 请选择操作：', 
-          Markup.inlineKeyboard(keyboard.getSettingsKeyboard()));
-        break;
-        
-      default:
-        await ctx.editMessageText('未知的菜单类型', 
-          Markup.inlineKeyboard(keyboard.getMainKeyboard()));
-        break;
-    }
-    
-    // 操作成功的反馈
-    await ctx.answerCbQuery().catch(() => {});
-    
-  } catch (error) {
-    console.error('处理菜单导航时出错:', error);
-    
+    // 使用try-catch来捕获每个菜单操作的具体错误
     try {
-      // 尝试显示错误消息
-      await ctx.editMessageText(`❌ 操作失败: ${error.message}`, 
-        Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+      // 根据菜单类型显示相应的界面
+      switch (menuType) {
+        case 'main':
+          await ctx.editMessageText('欢迎使用Telegram监控机器人控制面板', 
+            Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+          break;
+          
+        case 'dashboard':
+        case 'status': // 兼容旧的菜单类型
+          try {
+            const status = await require('./bot').getSystemStatus();
+            // 确保数据有效
+            if (!status) {
+              throw new Error('无法获取系统状态');
+            }
+            await ctx.editMessageText(status, 
+              Markup.inlineKeyboard(keyboard.getDashboardKeyboard()));
+          } catch (statusError) {
+            logger.error('获取系统状态失败:', statusError);
+            await ctx.editMessageText(`❌ 获取系统状态失败: ${statusError.message}`, 
+              Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+          }
+          break;
+          
+        case 'groups':
+          await ctx.editMessageText('群组管理 - 请选择操作：', 
+            Markup.inlineKeyboard(keyboard.getGroupsKeyboard()));
+          break;
+          
+        case 'rules':
+          await ctx.editMessageText('规则管理 - 请选择操作：', 
+            Markup.inlineKeyboard(keyboard.getRulesKeyboard()));
+          break;
+          
+        case 'pinning':
+          await ctx.editMessageText('置顶管理 - 请选择操作：', 
+            Markup.inlineKeyboard(keyboard.getPinningKeyboard()));
+          break;
+          
+        case 'diagnostics':
+          await ctx.editMessageText('系统自检 - 请选择操作：', 
+            Markup.inlineKeyboard(keyboard.getDiagnosticsKeyboard()));
+          break;
+          
+        case 'settings':
+          await ctx.editMessageText('设置 - 请选择操作：', 
+            Markup.inlineKeyboard(keyboard.getSettingsKeyboard()));
+          break;
+          
+        default:
+          await ctx.editMessageText('未知的菜单类型', 
+            Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+          break;
+      }
     } catch (editError) {
+      logger.error('编辑消息时出错:', editError);
       // 如果编辑消息失败，尝试发送新消息
       try {
-        await ctx.reply(`❌ 操作失败: ${error.message}`);
+        const currentMenu = await utils.getUserSession(ctx.from.id);
+        await ctx.reply('已切换到新菜单，请查看新消息', 
+          Markup.inlineKeyboard(keyboard.getMainKeyboard()));
       } catch (replyError) {
-        console.error('无法发送错误消息:', replyError);
+        logger.error('无法发送消息:', replyError);
       }
     }
     
-    // 发送回调查询回答
-    await ctx.answerCbQuery('❌ 操作失败').catch(() => {});
+    // 操作成功的反馈 - 使用超时避免长时间阻塞
+    setTimeout(() => {
+      ctx.answerCbQuery().catch(() => {});
+    }, 100);
+  } catch (error) {
+    // 捕获所有其他错误
+    logger.error('处理菜单导航时出错:', error);
   }
 };
 
 // 处理具体操作
 const handleAction = async (ctx, actionType, actionParams) => {
+  // 更新活动时间
+  updateActivity();
+  
   // 显示加载状态
-  await ctx.editMessageText('处理中...', 
-    Markup.inlineKeyboard(keyboard.getLoadingKeyboard()));
+  try {
+    await ctx.editMessageText('处理中...', 
+      Markup.inlineKeyboard(keyboard.getLoadingKeyboard()));
+  } catch (editError) {
+    logger.error('显示加载状态失败:', editError);
+    // 尝试发送新消息显示加载状态
+    try {
+      await ctx.reply('处理中...');
+    } catch (replyError) {
+      logger.error('无法发送加载状态消息:', replyError);
+    }
+  }
   
   try {
     switch (actionType) {
@@ -146,9 +178,17 @@ const handleAction = async (ctx, actionType, actionParams) => {
           Markup.inlineKeyboard(keyboard.getMainKeyboard()));
     }
   } catch (error) {
-    console.error(`处理操作失败:`, error);
-    await ctx.editMessageText(`操作失败: ${error.message}`, 
-      Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+    logger.error(`处理操作失败:`, error);
+    try {
+      await ctx.editMessageText(`操作失败: ${error.message}`, 
+        Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+    } catch (editError) {
+      try {
+        await ctx.reply(`操作失败: ${error.message}`);
+      } catch (replyError) {
+        logger.error('无法发送错误消息:', replyError);
+      }
+    }
   }
 };
 
@@ -157,62 +197,84 @@ const handleGroupAction = async (ctx, params) => {
   const [subAction, ...restParams] = params.split(':');
   const database = require('./database');
   
-  switch (subAction) {
-    case 'add_source':
-      // 开始添加源群组的场景
-      await utils.setUserSession(ctx.from.id, {
-        currentScene: 'add_source_group',
-        currentMenu: 'groups'
-      });
-      await ctx.editMessageText('请输入要添加的源群组ID（格式：-100xxxxxxx）：', 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
-      break;
-      
-    case 'set_target':
-      // 开始设置目标群组的场景
-      await utils.setUserSession(ctx.from.id, {
-        currentScene: 'set_target_group',
-        currentMenu: 'groups'
-      });
-      await ctx.editMessageText('请输入要设置的目标群组ID（格式：-100xxxxxxx）：', 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
-      break;
-      
-    case 'list':
-      // 显示群组列表
-      const groups = database.getGroups();
-      await ctx.editMessageText('源群组列表：', 
-        Markup.inlineKeyboard(keyboard.getGroupListKeyboard(groups, true)));
-      break;
-      
-    case 'config_rules':
-      // 配置群组规则
-      await utils.setUserSession(ctx.from.id, {
-        currentScene: 'config_group_rules',
-        currentMenu: 'groups'
-      });
-      await ctx.editMessageText('请输入要配置规则的群组ID：', 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
-      break;
-      
-    case 'toggle':
-      // 启用/禁用群组
-      const groupId = parseInt(restParams[0]);
-      const success = database.toggleGroupStatus(groupId);
-      
-      if (success) {
-        const groups = database.getGroups();
-        await ctx.editMessageText('源群组列表：', 
-          Markup.inlineKeyboard(keyboard.getGroupListKeyboard(groups, true)));
-      } else {
-        await ctx.editMessageText('切换群组状态失败，请检查群组ID是否正确', 
+  try {
+    switch (subAction) {
+      case 'add_source':
+        // 开始添加源群组的场景
+        await utils.setUserSession(ctx.from.id, {
+          currentScene: 'add_source_group',
+          currentMenu: 'groups'
+        });
+        await ctx.editMessageText('请输入要添加的源群组ID（格式：-100xxxxxxx）：', 
           Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
-      }
-      break;
-      
-    default:
-      await ctx.editMessageText(`未知的群组操作: ${subAction}`, 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
+        break;
+        
+      case 'set_target':
+        // 开始设置目标群组的场景
+        await utils.setUserSession(ctx.from.id, {
+          currentScene: 'set_target_group',
+          currentMenu: 'groups'
+        });
+        await ctx.editMessageText('请输入要设置的目标群组ID（格式：-100xxxxxxx）：', 
+          Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
+        break;
+        
+      case 'list':
+        // 显示群组列表 - 修复：添加await关键字
+        try {
+          const groups = await database.getGroups();
+          await ctx.editMessageText('源群组列表：', 
+            Markup.inlineKeyboard(keyboard.getGroupListKeyboard(groups, true)));
+        } catch (listError) {
+          console.error('获取群组列表失败:', listError);
+          await ctx.editMessageText(`获取群组列表失败: ${listError.message}`, 
+            Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
+        }
+        break;
+        
+      case 'config_rules':
+        // 配置群组规则
+        await utils.setUserSession(ctx.from.id, {
+          currentScene: 'config_group_rules',
+          currentMenu: 'groups'
+        });
+        await ctx.editMessageText('请输入要配置规则的群组ID：', 
+          Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
+        break;
+        
+      case 'toggle':
+        // 启用/禁用群组 - 修复：添加await关键字
+        try {
+          const groupId = parseInt(restParams[0]);
+          if (isNaN(groupId)) {
+            throw new Error('无效的群组ID');
+          }
+          
+          const success = await database.toggleGroupStatus(groupId);
+          
+          if (success) {
+            const groups = await database.getGroups();
+            await ctx.editMessageText('源群组列表：', 
+              Markup.inlineKeyboard(keyboard.getGroupListKeyboard(groups, true)));
+          } else {
+            await ctx.editMessageText('切换群组状态失败，请检查群组ID是否正确', 
+              Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
+          }
+        } catch (toggleError) {
+          console.error('切换群组状态失败:', toggleError);
+          await ctx.editMessageText(`切换群组状态失败: ${toggleError.message}`, 
+            Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
+        }
+        break;
+        
+      default:
+        await ctx.editMessageText(`未知的群组操作: ${subAction}`, 
+          Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
+    }
+  } catch (error) {
+    console.error('处理群组操作失败:', error);
+    await ctx.editMessageText(`处理群组操作失败: ${error.message}`, 
+      Markup.inlineKeyboard(keyboard.getBackKeyboard('groups')));
   }
 };
 
@@ -221,88 +283,112 @@ const handleRuleAction = async (ctx, params) => {
   const [subAction, ...restParams] = params.split(':');
   const database = require('./database');
   
-  switch (subAction) {
-    case 'add_global':
-      // 开始添加全局规则的场景
-      await utils.setUserSession(ctx.from.id, {
-        currentScene: 'add_global_rule',
-        currentMenu: 'rules'
-      });
-      await ctx.editMessageText('请输入要添加的全局规则（格式：关键词=替换内容）：', 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
-      break;
-      
-    case 'manage_group':
-      // 显示群组规则列表
-      const rules = database.getRules();
-      await ctx.editMessageText('群组专属规则列表：', 
-        Markup.inlineKeyboard(keyboard.getRuleListKeyboard(rules, 'group')));
-      break;
-      
-    case 'test':
-      // 开始规则测试场景
-      await utils.setUserSession(ctx.from.id, {
-        currentScene: 'test_rules',
-        currentMenu: 'rules'
-      });
-      await ctx.editMessageText('请输入要测试的文本：', 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
-      break;
-      
-    case 'import_export':
-      // 导入/导出规则
-      await ctx.editMessageText('规则导入/导出功能正在开发中...', 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
-      break;
-      
-    case 'delete_global':
-      // 删除全局规则
-      const keyword = decodeURIComponent(restParams[0]);
-      const success = database.deleteGlobalRule(keyword);
-      
-      if (success) {
-        const rules = database.getRules();
-        await ctx.editMessageText('全局规则列表：', 
-          Markup.inlineKeyboard(keyboard.getRuleListKeyboard(rules, 'global')));
-      } else {
-        await ctx.editMessageText('删除规则失败，请检查关键词是否正确', 
+  try {
+    switch (subAction) {
+      case 'add_global':
+        // 开始添加全局规则的场景
+        await utils.setUserSession(ctx.from.id, {
+          currentScene: 'add_global_rule',
+          currentMenu: 'rules'
+        });
+        await ctx.editMessageText('请输入要添加的全局规则（格式：关键词=替换内容）：', 
           Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
-      }
-      break;
-      
-    case 'view_group':
-      // 查看群组规则
-      const groupId = restParams[0];
-      const groupRules = database.getGroupRules(groupId);
-      
-      if (groupRules) {
-        let rulesText = `群组 ${groupId} 的规则：\n\n`;
-        rulesText += `状态: ${groupRules.enabled ? '✅ 启用' : '❌ 禁用'}\n`;
-        rulesText += `继承全局规则: ${groupRules.inheritGlobal ? '✅ 是' : '❌ 否'}\n\n`;
+        break;
         
-        if (Object.keys(groupRules.rules).length > 0) {
-          rulesText += '群组专属规则：\n';
-          Object.entries(groupRules.rules).forEach(([k, v]) => {
-            rulesText += `- ${k} → ${v}\n`;
-          });
-        } else {
-          rulesText += '暂无群组专属规则\n';
+      case 'manage_group':
+        // 显示群组规则列表 - 修复：添加await关键字
+        try {
+          const rules = await database.getRules();
+          await ctx.editMessageText('群组专属规则列表：', 
+            Markup.inlineKeyboard(keyboard.getRuleListKeyboard(rules, 'group')));
+        } catch (listError) {
+          console.error('获取规则列表失败:', listError);
+          await ctx.editMessageText(`获取规则列表失败: ${listError.message}`, 
+            Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
         }
+        break;
         
-        await ctx.editMessageText(rulesText, 
-          Markup.inlineKeyboard([
-            [Markup.button.callback('编辑规则', `action:rule:edit_group:${groupId}`)],
-            [Markup.button.callback('🔙 返回', 'menu:rules')]
-          ]));
-      } else {
-        await ctx.editMessageText('未找到该群组的规则配置', 
+      case 'test':
+        // 开始规则测试场景
+        await utils.setUserSession(ctx.from.id, {
+          currentScene: 'test_rules',
+          currentMenu: 'rules'
+        });
+        await ctx.editMessageText('请输入要测试的文本：', 
           Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
-      }
-      break;
-      
-    default:
-      await ctx.editMessageText(`未知的规则操作: ${subAction}`, 
-        Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
+        break;
+        
+      case 'import_export':
+        // 导入/导出规则
+        await ctx.editMessageText('规则导入/导出功能正在开发中...', 
+          Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
+        break;
+        
+      case 'delete_global':
+        // 删除全局规则 - 修复：添加await关键字
+        try {
+          const keyword = decodeURIComponent(restParams[0]);
+          const success = await database.deleteGlobalRule(keyword);
+          
+          if (success) {
+            const rules = await database.getRules();
+            await ctx.editMessageText('全局规则列表：', 
+              Markup.inlineKeyboard(keyboard.getRuleListKeyboard(rules, 'global')));
+          } else {
+            await ctx.editMessageText('删除规则失败，请检查关键词是否正确', 
+              Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
+          }
+        } catch (deleteError) {
+          console.error('删除规则失败:', deleteError);
+          await ctx.editMessageText(`删除规则失败: ${deleteError.message}`, 
+            Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
+        }
+        break;
+        
+      case 'view_group':
+        // 查看群组规则 - 修复：添加await关键字并完善逻辑
+        try {
+          const groupId = restParams[0];
+          const groupRules = await database.getGroupRules(groupId);
+          
+          if (groupRules) {
+            let rulesText = `群组 ${groupId} 的规则：\n\n`;
+            rulesText += `状态: ${groupRules.enabled ? '✅ 启用' : '❌ 禁用'}\n`;
+            rulesText += `继承全局规则: ${groupRules.inheritGlobal ? '✅ 是' : '❌ 否'}\n\n`;
+            
+            if (groupRules.rules && Object.keys(groupRules.rules).length > 0) {
+              rulesText += '群组专属规则：\n';
+              Object.entries(groupRules.rules).forEach(([k, v]) => {
+                rulesText += `- ${k} → ${v}\n`;
+              });
+            } else {
+              rulesText += '暂无群组专属规则\n';
+            }
+            
+            await ctx.editMessageText(rulesText, 
+              Markup.inlineKeyboard([
+                [Markup.button.callback('编辑规则', `action:rule:edit_group:${groupId}`)],
+                [Markup.button.callback('🔙 返回', 'menu:rules')]
+              ]));
+          } else {
+            await ctx.editMessageText(`未找到群组 ${groupId} 的规则配置`, 
+              Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
+          }
+        } catch (viewError) {
+          console.error('查看群组规则失败:', viewError);
+          await ctx.editMessageText(`查看群组规则失败: ${viewError.message}`, 
+            Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
+        }
+        break;
+        
+      default:
+        await ctx.editMessageText(`未知的规则操作: ${subAction}`, 
+          Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
+    }
+  } catch (error) {
+    console.error('处理规则操作失败:', error);
+    await ctx.editMessageText(`处理规则操作失败: ${error.message}`, 
+      Markup.inlineKeyboard(keyboard.getBackKeyboard('rules')));
   }
 };
 

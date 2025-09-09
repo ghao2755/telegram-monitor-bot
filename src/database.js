@@ -2,8 +2,31 @@
 const fs = require('fs-extra');
 const path = require('path');
 
-// 导入验证函数
-const { validateGroupsData, validateRulesData } = require('./utils');
+// 导入日志模块
+const logger = require('./logger');
+
+// 导入验证函数，添加错误处理
+let validateGroupsData, validateRulesData;
+try {
+  const utils = require('./utils');
+  validateGroupsData = utils.validateGroupsData;
+  validateRulesData = utils.validateRulesData;
+  
+  if (!validateGroupsData || !validateRulesData) {
+    throw new Error('utils模块中缺少必要的验证函数');
+  }
+} catch (error) {
+  logger.error('导入验证函数失败:', error);
+  // 提供默认的验证函数实现作为备选
+  validateGroupsData = (data) => {
+    if (!data) return { sources: [], targets: [] };
+    return { sources: [], targets: [] };
+  };
+  validateRulesData = (data) => {
+    if (!data) return { global: {}, groupSpecific: {} };
+    return { global: {}, groupSpecific: {} };
+  };
+}
 
 // 定义数据文件路径
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -36,53 +59,119 @@ const init = async () => {
     
     // 初始化群组数据文件
     if (!await fs.pathExists(GROUPS_FILE)) {
-      await fs.writeJSON(GROUPS_FILE, DEFAULT_GROUPS, { spaces: 2 });
-      console.log('已创建默认群组数据文件');
+      await safeWriteFile(GROUPS_FILE, DEFAULT_GROUPS);
+      logger.info('已创建默认群组数据文件');
     }
     
     // 初始化规则数据文件
     if (!await fs.pathExists(RULES_FILE)) {
-      await fs.writeJSON(RULES_FILE, DEFAULT_RULES, { spaces: 2 });
-      console.log('已创建默认规则数据文件');
+      await safeWriteFile(RULES_FILE, DEFAULT_RULES);
+      logger.info('已创建默认规则数据文件');
     }
     
     // 初始化系统设置文件
     if (!await fs.pathExists(SETTINGS_FILE)) {
-      await fs.writeJSON(SETTINGS_FILE, DEFAULT_SETTINGS, { spaces: 2 });
-      console.log('已创建默认系统设置文件');
+      await safeWriteFile(SETTINGS_FILE, DEFAULT_SETTINGS);
+      logger.info('已创建默认系统设置文件');
     }
     
-    console.log('数据库初始化成功');
+    logger.info('数据库初始化成功');
   } catch (error) {
-    console.error('数据库初始化失败:', error);
+    logger.error('数据库初始化失败:', error);
     throw error;
   }
 };
 
-// 读取文件内容的通用函数
-const readFile = async (filePath, defaultValue) => {
+// 文件锁对象，用于防止并发写入
+const fileLocks = new Map();
+
+// 安全写入文件函数 - 增强版，包含目录确保、文件锁和错误处理
+async function safeWriteFile(filePath, data, maxRetries = 3) {
   try {
-    if (!await fs.pathExists(filePath)) {
-      await fs.writeJSON(filePath, defaultValue, { spaces: 2 });
-      return defaultValue;
-    }
+    // 确保目录存在
+    await fs.ensureDir(path.dirname(filePath));
     
-    const content = await fs.readJSON(filePath);
-    return content;
+    let retries = 0;
+    const lockKey = filePath;
+    
+    while (true) {
+      try {
+        // 尝试获取文件锁
+        while (fileLocks.has(lockKey)) {
+          // 如果文件已被锁定，等待一段时间后重试
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // 设置锁
+        fileLocks.set(lockKey, true);
+        
+        try {
+          // 创建文件备份（如果文件已存在）
+          if (await fs.pathExists(filePath)) {
+            const backupPath = `${filePath}.bak`;
+            await fs.copyFile(filePath, backupPath);
+          }
+          
+          // 写入文件
+          await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+          logger.debug(`安全写入文件成功: ${filePath}`);
+          return true;
+        } finally {
+          // 确保释放锁
+          fileLocks.delete(lockKey);
+        }
+      } catch (error) {
+        retries++;
+        
+        if (retries >= maxRetries) {
+          logger.error(`安全写入文件 ${filePath} 失败（已重试${maxRetries}次）:`, error);
+          throw error;
+        }
+        
+        logger.warn(`安全写入文件 ${filePath} 失败，${retries * 1000}毫秒后重试（第${retries}次）:`, error.message);
+        await new Promise(resolve => setTimeout(resolve, 1000 * retries)); // 递增延迟重试
+      }
+    }
   } catch (error) {
-    console.error(`读取文件 ${filePath} 失败，返回默认值:`, error);
-    return defaultValue; // 返回默认值而不是抛出错误
+    logger.error('文件写入失败:', error);
+    return false;
   }
+}
+
+// 读取文件内容的通用函数 - 添加重试机制
+const readFile = async (filePath, defaultValue, maxRetries = 3) => {
+  let retries = 0;
+  
+  while (retries < maxRetries) {
+    try {
+      // 检查文件是否存在
+      if (!await fs.pathExists(filePath)) {
+        await safeWriteFile(filePath, defaultValue);
+        return defaultValue;
+      }
+      
+      // 读取文件内容
+      const content = await fs.readJSON(filePath);
+      return content;
+    } catch (error) {
+      retries++;
+      
+      if (retries >= maxRetries) {
+        logger.error(`读取文件 ${filePath} 失败，返回默认值（已重试${maxRetries}次）:`, error);
+        return defaultValue; // 返回默认值而不是抛出错误
+      }
+      
+      logger.warn(`读取文件 ${filePath} 失败，${retries}秒后重试（第${retries}次）:`, error.message);
+      await new Promise(resolve => setTimeout(resolve, 1000 * retries)); // 递增延迟重试
+    }
+  }
+  
+  return defaultValue; // 理论上不会到达这里，但为了安全起见
 };
 
-// 写入文件的通用函数
-const writeFile = async (filePath, data) => {
-  try {
-    await fs.writeJSON(filePath, data, { spaces: 2 });
-  } catch (error) {
-    console.error(`写入文件 ${filePath} 失败:`, error);
-    throw error;
-  }
+// 写入文件的通用函数 - 使用增强版的safeWriteFile
+const writeFile = async (filePath, data, maxRetries = 3) => {
+  return await safeWriteFile(filePath, data, maxRetries);
 };
 
 // 群组配置管理
@@ -94,13 +183,10 @@ const getGroups = async () => {
     // 使用验证函数确保数据格式正确
     return validateGroupsData(data);
   } catch (error) {
-    console.error('获取群组配置失败:', error);
+    logger.error('获取群组配置失败:', error);
     return DEFAULT_GROUPS;
   }
 };
-
-// 导入验证函数
-const { validateGroupsData, validateRulesData } = require('./utils');
 
 // 添加源群组
 const addSourceGroup = async (groupId, groupName) => {
@@ -120,7 +206,7 @@ const addSourceGroup = async (groupId, groupName) => {
       enabled: true
     });
     
-    await writeFile(GROUPS_FILE, groups);
+    await safeWriteFile(GROUPS_FILE, groups);
     console.log(`已添加源群组: ${groupName} (ID: ${groupId})`);
   } catch (error) {
     console.error('添加源群组失败:', error);
@@ -147,7 +233,7 @@ const addTargetGroup = async (groupId, groupName) => {
       pinEnabled: false
     });
     
-    await writeFile(GROUPS_FILE, groups);
+    await safeWriteFile(GROUPS_FILE, groups);
     console.log(`已添加目标群组: ${groupName} (ID: ${groupId})`);
   } catch (error) {
     console.error('添加目标群组失败:', error);
@@ -164,7 +250,7 @@ const deleteGroup = async (groupId) => {
     const sourceIndex = groups.sources.findIndex(g => g.id === groupId);
     if (sourceIndex !== -1) {
       groups.sources.splice(sourceIndex, 1);
-      await writeFile(GROUPS_FILE, groups);
+      await safeWriteFile(GROUPS_FILE, groups);
       console.log(`已删除源群组 (ID: ${groupId})`);
       return true;
     }
@@ -173,7 +259,7 @@ const deleteGroup = async (groupId) => {
     const targetIndex = groups.targets.findIndex(g => g.id === groupId);
     if (targetIndex !== -1) {
       groups.targets.splice(targetIndex, 1);
-      await writeFile(GROUPS_FILE, groups);
+      await safeWriteFile(GROUPS_FILE, groups);
       console.log(`已删除目标群组 (ID: ${groupId})`);
       return true;
     }
@@ -204,7 +290,7 @@ const toggleGroupStatus = async (groupId) => {
     // 切换状态
     group.enabled = !group.enabled;
     
-    await writeFile(GROUPS_FILE, groups);
+    await safeWriteFile(GROUPS_FILE, groups);
     console.log(`已切换群组状态: ${group.name} (ID: ${groupId}) - 现在${group.enabled ? '启用' : '禁用'}`);
     return true;
   } catch (error) {
@@ -226,7 +312,7 @@ const togglePinStatus = async (groupId) => {
     // 切换置顶状态
     group.pinEnabled = !group.pinEnabled;
     
-    await writeFile(GROUPS_FILE, groups);
+    await safeWriteFile(GROUPS_FILE, groups);
     console.log(`已切换群组置顶状态: ${group.name} (ID: ${groupId}) - 现在${group.pinEnabled ? '启用' : '禁用'}`);
     return true;
   } catch (error) {
@@ -257,7 +343,7 @@ const addGlobalRule = async (keyword, replacement) => {
     // 添加或更新规则
     rules.global[keyword] = replacement;
     
-    await writeFile(RULES_FILE, rules);
+    await safeWriteFile(RULES_FILE, rules);
     console.log(`已添加全局规则: ${keyword} → ${replacement}`);
   } catch (error) {
     console.error('添加全局规则失败:', error);
@@ -277,7 +363,7 @@ const deleteGlobalRule = async (keyword) => {
     // 删除规则
     delete rules.global[keyword];
     
-    await writeFile(RULES_FILE, rules);
+    await safeWriteFile(RULES_FILE, rules);
     console.log(`已删除全局规则: ${keyword}`);
     return true;
   } catch (error) {
@@ -314,7 +400,7 @@ const addGroupRule = async (groupId, keyword, replacement) => {
     // 添加规则
     rules.groupSpecific[groupId].rules[keyword] = replacement;
     
-    await writeFile(RULES_FILE, rules);
+    await safeWriteFile(RULES_FILE, rules);
     console.log(`已添加群组 ${groupId} 专属规则: ${keyword} → ${replacement}`);
   } catch (error) {
     console.error(`添加群组 ${groupId} 专属规则失败:`, error);
@@ -339,7 +425,7 @@ const deleteGroupRule = async (groupId, keyword) => {
       delete rules.groupSpecific[groupId];
     }
     
-    await writeFile(RULES_FILE, rules);
+    await safeWriteFile(RULES_FILE, rules);
     console.log(`已删除群组 ${groupId} 专属规则: ${keyword}`);
     return true;
   } catch (error) {
@@ -360,7 +446,7 @@ const toggleGroupRulesStatus = async (groupId) => {
     // 切换状态
     rules.groupSpecific[groupId].enabled = !rules.groupSpecific[groupId].enabled;
     
-    await writeFile(RULES_FILE, rules);
+    await safeWriteFile(RULES_FILE, rules);
     console.log(`已切换群组 ${groupId} 规则状态 - 现在${rules.groupSpecific[groupId].enabled ? '启用' : '禁用'}`);
     return true;
   } catch (error) {
@@ -381,7 +467,7 @@ const toggleInheritGlobalRules = async (groupId) => {
     // 切换继承状态
     rules.groupSpecific[groupId].inheritGlobal = !rules.groupSpecific[groupId].inheritGlobal;
     
-    await writeFile(RULES_FILE, rules);
+    await safeWriteFile(RULES_FILE, rules);
     console.log(`已切换群组 ${groupId} 继承全局规则状态 - 现在${rules.groupSpecific[groupId].inheritGlobal ? '启用' : '禁用'}`);
     return true;
   } catch (error) {
@@ -407,7 +493,7 @@ const updateCheckInterval = async (interval) => {
   try {
     const settings = await getSettings();
     settings.checkInterval = interval;
-    await writeFile(SETTINGS_FILE, settings);
+    await safeWriteFile(SETTINGS_FILE, settings);
     console.log(`已更新检查间隔为: ${interval} 毫秒`);
   } catch (error) {
     console.error('更新检查间隔失败:', error);
@@ -420,7 +506,7 @@ const updateLastCheckTime = async () => {
   try {
     const settings = await getSettings();
     settings.lastCheck = new Date().toISOString();
-    await writeFile(SETTINGS_FILE, settings);
+    await safeWriteFile(SETTINGS_FILE, settings);
   } catch (error) {
     console.error('更新最后检查时间失败:', error);
     // 这个错误不需要抛出，因为不影响系统运行
@@ -432,7 +518,7 @@ const toggleAutoStart = async () => {
   try {
     const settings = await getSettings();
     settings.autoStart = !settings.autoStart;
-    await writeFile(SETTINGS_FILE, settings);
+    await safeWriteFile(SETTINGS_FILE, settings);
     console.log(`已切换自动启动设置 - 现在${settings.autoStart ? '启用' : '禁用'}`);
     return settings.autoStart;
   } catch (error) {
@@ -511,7 +597,7 @@ const exportRules = async () => {
     await fs.ensureDir(exportDir);
     
     // 写入导出文件
-    await fs.writeJSON(exportFile, rules, { spaces: 2 });
+    await safeWriteFile(exportFile, rules);
     
     console.log(`规则已导出到: ${exportFile}`);
     return exportFile;
@@ -533,7 +619,7 @@ const importRules = async (filePath) => {
     }
     
     // 写入规则文件
-    await writeFile(RULES_FILE, importedRules);
+    await safeWriteFile(RULES_FILE, importedRules);
     
     console.log(`规则已从 ${filePath} 导入`);
     return true;
@@ -562,7 +648,7 @@ const backupData = async () => {
     };
     
     // 写入备份文件
-    await fs.writeJSON(backupFile, allData, { spaces: 2 });
+    await safeWriteFile(backupFile, allData);
     
     console.log(`数据已备份到: ${backupFile}`);
     return backupFile;
@@ -584,9 +670,9 @@ const restoreData = async (backupFilePath) => {
     }
     
     // 恢复数据
-    await writeFile(GROUPS_FILE, backupData.groups);
-    await writeFile(RULES_FILE, backupData.rules);
-    await writeFile(SETTINGS_FILE, backupData.settings);
+    await safeWriteFile(GROUPS_FILE, backupData.groups);
+    await safeWriteFile(RULES_FILE, backupData.rules);
+    await safeWriteFile(SETTINGS_FILE, backupData.settings);
     
     console.log(`数据已从 ${backupFilePath} 恢复`);
     return true;
@@ -631,5 +717,9 @@ module.exports = {
   exportRules,
   importRules,
   backupData,
-  restoreData
+  restoreData,
+  
+  // 导出增强版文件操作函数供外部使用
+  safeWriteFile,
+  readFile
 };

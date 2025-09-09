@@ -45,6 +45,13 @@
    ```bash
    npm install
    ```
+1. 安装项目依赖并启动机器人
+```
+npm install
+npm start  # 生产环境启动
+# 或在开发环境使用
+npm run de
+```
 
 3. **配置环境变量**
    复制`.env.example`文件并命名为`.env`，然后编辑文件：

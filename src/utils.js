@@ -4,6 +4,9 @@ const path = require('path');
 const os = require('os');
 const process = require('process');
 
+// 导入日志模块
+const logger = require('./logger');
+
 // 定义会话文件路径
 const SESSIONS_FILE = path.join(__dirname, '..', 'data', 'sessions.json');
 
@@ -13,27 +16,57 @@ const BOT_START_TIME = Date.now();
 // 会话缓存
 let sessionsCache = {};
 
+// 会话过期时间（30分钟）
+const SESSION_EXPIRATION_TIME = 30 * 60 * 1000;
+
 // 初始化会话系统
 const initSessions = async () => {
   try {
     if (await fs.pathExists(SESSIONS_FILE)) {
       sessionsCache = await fs.readJSON(SESSIONS_FILE);
+      // 清理过期会话
+      cleanupExpiredSessions();
     } else {
       sessionsCache = {};
       await fs.writeJSON(SESSIONS_FILE, sessionsCache, { spaces: 2 });
     }
   } catch (error) {
-    console.error('初始化会话系统失败:', error);
+    logger.error('初始化会话系统失败:', error);
     sessionsCache = {};
   }
 };
+
+// 清理过期会话
+const cleanupExpiredSessions = () => {
+  const now = Date.now();
+  const expiredCount = Object.keys(sessionsCache).reduce((count, userId) => {
+    const session = sessionsCache[userId];
+    // 检查会话是否存在且有最后访问时间
+    if (session && session.lastAccessed && (now - session.lastAccessed > SESSION_EXPIRATION_TIME)) {
+      delete sessionsCache[userId];
+      return count + 1;
+    }
+    return count;
+  }, 0);
+  
+  if (expiredCount > 0) {
+    logger.info(`清理了 ${expiredCount} 个过期会话`);
+    // 保存清理后的会话
+    saveSessions();
+  }
+};
+
+// 定时清理过期会话（每小时执行一次）
+setInterval(() => {
+  cleanupExpiredSessions();
+}, 60 * 60 * 1000);
 
 // 保存会话到文件
 const saveSessions = async () => {
   try {
     await fs.writeJSON(SESSIONS_FILE, sessionsCache, { spaces: 2 });
   } catch (error) {
-    console.error('保存会话失败:', error);
+    logger.error('保存会话失败:', error);
   }
 };
 
@@ -45,9 +78,17 @@ const getUserSession = async (userId) => {
       await initSessions();
     }
     
-    return sessionsCache[userId] || {};
+    // 确保会话对象存在
+    if (!sessionsCache[userId]) {
+      sessionsCache[userId] = {};
+    }
+    
+    // 更新最后访问时间
+    sessionsCache[userId].lastAccessed = Date.now();
+    
+    return { ...sessionsCache[userId] };
   } catch (error) {
-    console.error(`获取用户 ${userId} 会话失败:`, error);
+    logger.error(`获取用户 ${userId} 会话失败:`, error);
     return {};
   }
 };
@@ -60,10 +101,16 @@ const setUserSession = async (userId, sessionData) => {
       await initSessions();
     }
     
+    // 确保会话对象存在
+    if (!sessionsCache[userId]) {
+      sessionsCache[userId] = {};
+    }
+    
     // 合并会话数据
     sessionsCache[userId] = {
       ...sessionsCache[userId],
-      ...sessionData
+      ...sessionData,
+      lastAccessed: Date.now() // 更新最后访问时间
     };
     
     // 异步保存到文件（不阻塞主流程）
@@ -178,7 +225,7 @@ const getSystemResources = () => {
       uptime: os.uptime() + ' 秒'
     };
   } catch (error) {
-    console.error('获取系统资源使用情况失败:', error);
+    logger.error('获取系统资源使用情况失败:', error);
     return null;
   }
 };
@@ -230,7 +277,7 @@ const rateLimiter = new RateLimiter();
 
 // 错误处理函数
 const handleError = (error, context = '') => {
-  console.error(`[${context || '未知上下文'}] 错误:`, error);
+  logger.error(`[${context || '未知上下文'}] 错误:`, error);
   
   // 可以在这里添加错误日志记录、通知管理员等功能
   

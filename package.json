@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "monitor": "pm2 start ecosystem.config.js",
+    "logs": "pm2 logs telegram-bot"
   },
   "dependencies": {
     "telegraf": "^4.0.0",
