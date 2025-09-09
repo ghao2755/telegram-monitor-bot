@@ -23,6 +23,25 @@ const ensureDirectories = async () => {
   }
 };
 
+// 初始化数据文件
+const initializeData = async () => {
+  const dataDir = path.join(__dirname, 'data');
+  const files = {
+    'groups.json': JSON.stringify({ sources: [], targets: [] }, null, 2),
+    'rules.json': JSON.stringify({ global: {}, groupSpecific: {} }, null, 2),
+    'settings.json': JSON.stringify({ autoStart: true, checkInterval: 300000 }, null, 2)
+  };
+  
+  // 检查并创建缺失的文件
+  for (const [filename, content] of Object.entries(files)) {
+    const filepath = path.join(dataDir, filename);
+    if (!await fs.pathExists(filepath)) {
+      console.log(`创建默认数据文件: ${filename}`);
+      await fs.writeFile(filepath, content);
+    }
+  }
+};
+
 // 初始化机器人
 const initBot = async () => {
   try {
@@ -67,6 +86,8 @@ const initBot = async () => {
 const main = async () => {
   console.log('开始初始化Telegram监控机器人...');
   await ensureDirectories();
+  // 在启动机器人前初始化数据文件
+  await initializeData();
   await initBot();
 };
 

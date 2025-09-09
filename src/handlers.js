@@ -9,50 +9,80 @@ const utils = require('./utils');
 
 // 处理菜单导航
 const handleMenuNavigation = async (ctx, menuType) => {
-  // 记录当前菜单
-  await utils.setUserSession(ctx.from.id, { currentMenu: menuType });
-  
-  // 根据菜单类型显示相应的界面
-  switch (menuType) {
-    case 'main':
-      await ctx.editMessageText('欢迎使用Telegram监控机器人控制面板', 
+  try {
+    // 记录当前菜单
+    await utils.setUserSession(ctx.from.id, { currentMenu: menuType });
+    
+    // 根据菜单类型显示相应的界面
+    switch (menuType) {
+      case 'main':
+        await ctx.editMessageText('欢迎使用Telegram监控机器人控制面板', 
+          Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+        break;
+        
+      case 'dashboard':
+      case 'status': // 兼容旧的菜单类型
+        const status = await require('./bot').getSystemStatus();
+        // 确保数据有效
+        if (!status) {
+          throw new Error('无法获取系统状态');
+        }
+        await ctx.editMessageText(status, 
+          Markup.inlineKeyboard(keyboard.getDashboardKeyboard()));
+        break;
+        
+      case 'groups':
+        await ctx.editMessageText('群组管理 - 请选择操作：', 
+          Markup.inlineKeyboard(keyboard.getGroupsKeyboard()));
+        break;
+        
+      case 'rules':
+        await ctx.editMessageText('规则管理 - 请选择操作：', 
+          Markup.inlineKeyboard(keyboard.getRulesKeyboard()));
+        break;
+        
+      case 'pinning':
+        await ctx.editMessageText('置顶管理 - 请选择操作：', 
+          Markup.inlineKeyboard(keyboard.getPinningKeyboard()));
+        break;
+        
+      case 'diagnostics':
+        await ctx.editMessageText('系统自检 - 请选择操作：', 
+          Markup.inlineKeyboard(keyboard.getDiagnosticsKeyboard()));
+        break;
+        
+      case 'settings':
+        await ctx.editMessageText('设置 - 请选择操作：', 
+          Markup.inlineKeyboard(keyboard.getSettingsKeyboard()));
+        break;
+        
+      default:
+        await ctx.editMessageText('未知的菜单类型', 
+          Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+        break;
+    }
+    
+    // 操作成功的反馈
+    await ctx.answerCbQuery().catch(() => {});
+    
+  } catch (error) {
+    console.error('处理菜单导航时出错:', error);
+    
+    try {
+      // 尝试显示错误消息
+      await ctx.editMessageText(`❌ 操作失败: ${error.message}`, 
         Markup.inlineKeyboard(keyboard.getMainKeyboard()));
-      break;
-      
-    case 'dashboard':
-      const status = await require('./bot').getSystemStatus();
-      await ctx.editMessageText(status, 
-        Markup.inlineKeyboard(keyboard.getDashboardKeyboard()));
-      break;
-      
-    case 'groups':
-      await ctx.editMessageText('群组管理 - 请选择操作：', 
-        Markup.inlineKeyboard(keyboard.getGroupsKeyboard()));
-      break;
-      
-    case 'rules':
-      await ctx.editMessageText('规则管理 - 请选择操作：', 
-        Markup.inlineKeyboard(keyboard.getRulesKeyboard()));
-      break;
-      
-    case 'pinning':
-      await ctx.editMessageText('置顶管理 - 请选择操作：', 
-        Markup.inlineKeyboard(keyboard.getPinningKeyboard()));
-      break;
-      
-    case 'diagnostics':
-      await ctx.editMessageText('系统自检 - 请选择操作：', 
-        Markup.inlineKeyboard(keyboard.getDiagnosticsKeyboard()));
-      break;
-      
-    case 'settings':
-      await ctx.editMessageText('设置 - 请选择操作：', 
-        Markup.inlineKeyboard(keyboard.getSettingsKeyboard()));
-      break;
-      
-    default:
-      await ctx.editMessageText('未知的菜单类型', 
-        Markup.inlineKeyboard(keyboard.getMainKeyboard()));
+    } catch (editError) {
+      // 如果编辑消息失败，尝试发送新消息
+      try {
+        await ctx.reply(`❌ 操作失败: ${error.message}`);
+      } catch (replyError) {
+        console.error('无法发送错误消息:', replyError);
+      }
+    }
+    
+    // 发送回调查询回答
+    await ctx.answerCbQuery('❌ 操作失败').catch(() => {});
   }
 };
 

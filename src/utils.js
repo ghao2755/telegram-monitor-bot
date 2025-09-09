@@ -356,6 +356,25 @@ const translate = (key, language = 'zh') => {
   return translations[language]?.[key] || translations['zh']?.[key] || key;
 };
 
+// 数据验证工具函数
+const validateGroupsData = (data) => {
+  if (!data) return { sources: [], targets: [] };
+  
+  return {
+    sources: Array.isArray(data.sources) ? data.sources : [],
+    targets: Array.isArray(data.targets) ? data.targets : []
+  };
+};
+
+const validateRulesData = (data) => {
+  if (!data) return { global: {}, groupSpecific: {} };
+  
+  return {
+    global: data.global && typeof data.global === 'object' ? data.global : {},
+    groupSpecific: data.groupSpecific && typeof data.groupSpecific === 'object' ? data.groupSpecific : {}
+  };
+};
+
 // 导出所有函数和类
 module.exports = {
   // 会话管理
@@ -375,6 +394,8 @@ module.exports = {
   validateGroupId,
   validateRegex,
   getSystemResources,
+  validateGroupsData,
+  validateRulesData,
   
   // 速率限制
   rateLimiter,

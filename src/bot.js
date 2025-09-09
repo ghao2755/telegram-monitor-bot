@@ -1,8 +1,19 @@
 // 导入必要的模块
-const { Markup } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const cron = require('node-cron');
 const fs = require('fs-extra');
 const path = require('path');
+
+// 全局错误处理
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('未处理的 Promise 拒绝:', reason);
+  // 可以添加通知管理员的逻辑
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('未捕获的异常:', error);
+  // 可以添加重启逻辑或通知管理员
+});
 
 // 导入自定义模块
 const keyboard = require('./keyboard');
@@ -148,11 +159,12 @@ const initCronJobs = () => {
   const interval = settings.checkInterval || 300000; // 默认5分钟
   const cronExpression = `*/${interval / 60000} * * * *`; // 转换为分钟
 
-  // 定时检查群组状态和处理消息
+  // 定时检查任务
   cron.schedule(cronExpression, async () => {
+    console.log('执行定时检查...');
     try {
-      console.log('执行定时检查...');
-      await checkGroupsStatus();
+      const result = await checkGroupsStatus();
+      console.log(`定时检查完成: 检查了 ${result.checked} 个群组, ${result.errors} 个错误`);
       
       // 更新最后检查时间
       database.updateLastCheckTime();
@@ -176,40 +188,70 @@ const initCronJobs = () => {
 
 // 检查群组状态
 const checkGroupsStatus = async () => {
-  const groups = database.getGroups();
-  
-  for (const sourceGroup of groups.sources) {
-    if (sourceGroup.enabled) {
+  try {
+    const groups = await database.getGroups() || { sources: [], targets: [] };
+    
+    // 确保 sources 是数组
+    const sources = Array.isArray(groups.sources) ? groups.sources : [];
+    
+    for (const source of sources) {
+      // 检查每个源群组的状态
       try {
-        // 这里可以实现检查群组状态的逻辑
-        // 例如检查是否有新消息、成员变化等
-        console.log(`检查群组状态: ${sourceGroup.name} (ID: ${sourceGroup.id})`);
-        
-        // 这里是一个占位符，实际实现需要根据Telegraf API和需求进行调整
+        // 这里添加实际的群组状态检查逻辑
+        console.log(`检查群组: ${source.id || '未知群组'}`);
       } catch (error) {
-        console.error(`检查群组 ${sourceGroup.name} 状态失败:`, error);
+        console.error(`检查群组 ${source.id} 时出错:`, error);
       }
     }
+    
+    return { checked: sources.length, errors: 0 };
+  } catch (error) {
+    console.error('检查群组状态时发生错误:', error);
+    return { checked: 0, errors: 1, message: error.message };
   }
 };
 
 // 获取系统状态
 const getSystemStatus = async () => {
-  const groups = database.getGroups();
-  const rules = database.getRules();
-  const settings = database.getSettings();
-
-  const status = `📊 系统状态\n\n` +
-    `环境: ${process.env.NODE_ENV || 'development'}\n` +
-    `源群组数量: ${groups.sources.length}\n` +
-    `目标群组数量: ${groups.targets.length}\n` +
-    `全局规则数量: ${Object.keys(rules.global).length}\n` +
-    `群组专属规则: ${Object.keys(rules.groupSpecific).length}\n` +
-    `检查间隔: ${(settings.checkInterval || 300000) / 60000} 分钟\n` +
-    `上次检查: ${new Date(settings.lastCheck).toLocaleString()}\n` +
-    `运行时间: ${utils.getUptime()}`;
-
-  return status;
+  try {
+    // 确保从数据库读取数据时提供默认值
+    const groups = await database.getGroups() || { sources: [], targets: [] };
+    const rules = await database.getRules() || { global: {}, groupSpecific: {} };
+    const settings = await database.getSettings() || {};
+    
+    // 添加空值检查
+    const sourceCount = groups.sources ? groups.sources.length : 0;
+    const targetCount = groups.targets ? groups.targets.length : 0;
+    const globalRuleCount = rules.global ? Object.keys(rules.global).length : 0;
+    
+    // 计算群组专属规则总数
+    let groupRuleCount = 0;
+    if (rules.groupSpecific) {
+      for (const groupId in rules.groupSpecific) {
+        if (rules.groupSpecific[groupId].rules) {
+          groupRuleCount += Object.keys(rules.groupSpecific[groupId].rules).length;
+        }
+      }
+    }
+    
+    // 格式化返回状态信息字符串
+    const statusMessage = `📊 系统状态\n\n` +
+      `环境: ${process.env.NODE_ENV || 'development'}\n` +
+      `源群组数量: ${sourceCount}\n` +
+      `目标群组数量: ${targetCount}\n` +
+      `全局规则数量: ${globalRuleCount}\n` +
+      `群组专属规则总数: ${groupRuleCount}\n` +
+      `群组专属规则配置数: ${rules.groupSpecific ? Object.keys(rules.groupSpecific).length : 0}\n` +
+      `检查间隔: ${(settings.checkInterval || 300000) / 60000} 分钟\n` +
+      `上次检查: ${settings.lastCheck ? new Date(settings.lastCheck).toLocaleString() : '从未检查'}\n` +
+      `运行时间: ${utils.getUptime()}`;
+    
+    return statusMessage;
+    
+  } catch (error) {
+    console.error('获取系统状态时出错:', error);
+    return `❌ 系统状态获取失败\n错误信息: ${error.message}`;
+  }
 };
 
 // 导出模块

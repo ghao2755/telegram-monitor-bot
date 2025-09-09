@@ -37,7 +37,7 @@
 
 1. **克隆或下载项目代码**
    ```bash
-   git clone <项目仓库地址>
+   git clone https://github.com/ghao2755/telegram-monitor-bot.git
    cd telegram-monitor-bot
    ```
 
@@ -54,8 +54,8 @@
    ```
    在文件中填入以下信息：
    ```
-   BOT_TOKEN=你的机器人token
-   ADMIN_IDS=管理员ID列表，用逗号分隔
+   BOT_TOKEN=7699035106:AAHn-SQPEGsF9sneaAt8cLsAfKa6QZOoNjA
+   ADMIN_IDS=6322298464,6570676316
    NODE_ENV=production
    ```
 

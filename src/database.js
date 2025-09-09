@@ -2,6 +2,9 @@
 const fs = require('fs-extra');
 const path = require('path');
 
+// 导入验证函数
+const { validateGroupsData, validateRulesData } = require('./utils');
+
 // 定义数据文件路径
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const GROUPS_FILE = path.join(DATA_DIR, 'groups.json');
@@ -67,8 +70,8 @@ const readFile = async (filePath, defaultValue) => {
     const content = await fs.readJSON(filePath);
     return content;
   } catch (error) {
-    console.error(`读取文件 ${filePath} 失败:`, error);
-    throw error;
+    console.error(`读取文件 ${filePath} 失败，返回默认值:`, error);
+    return defaultValue; // 返回默认值而不是抛出错误
   }
 };
 
@@ -87,12 +90,17 @@ const writeFile = async (filePath, data) => {
 // 获取所有群组配置
 const getGroups = async () => {
   try {
-    return await readFile(GROUPS_FILE, DEFAULT_GROUPS);
+    const data = await readFile(GROUPS_FILE, DEFAULT_GROUPS);
+    // 使用验证函数确保数据格式正确
+    return validateGroupsData(data);
   } catch (error) {
     console.error('获取群组配置失败:', error);
     return DEFAULT_GROUPS;
   }
 };
+
+// 导入验证函数
+const { validateGroupsData, validateRulesData } = require('./utils');
 
 // 添加源群组
 const addSourceGroup = async (groupId, groupName) => {
@@ -232,7 +240,9 @@ const togglePinStatus = async (groupId) => {
 // 获取所有规则
 const getRules = async () => {
   try {
-    return await readFile(RULES_FILE, DEFAULT_RULES);
+    const data = await readFile(RULES_FILE, DEFAULT_RULES);
+    // 使用验证函数确保数据格式正确
+    return validateRulesData(data);
   } catch (error) {
     console.error('获取规则配置失败:', error);
     return DEFAULT_RULES;
